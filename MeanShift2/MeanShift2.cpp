@@ -20,6 +20,7 @@ double** vectorsPoints;
 double* centroids;
 double** centroidsPoints;
 double windowSize;
+bool* settled;
 
 void LoadData(string filepath);
 void NormalizeDataset();
@@ -27,19 +28,20 @@ double FindMin(int index);
 double FindMax(int index);
 void Run(double windowS);
 double* Kernel(double* input);
-double* Hustota();
+double* Hustota(int pos, double** okoliBodu, int pocet);
+bool PosunHustotaTest(int pos, double** okoliBodu, int pocet, double* centroid);
 double* Add(double* one, double* two);
 
 int main(int argc, char* argv[])
 {
-	//LoadData("C:\\Users\\hapes\\Downloads\\meanSoubory\\mnist_test2.csv");
-	LoadData("C:\\Users\\hapes\\Downloads\\vektory.txt");
+	LoadData("C:\\Users\\hapes\\Downloads\\meanSoubory\\mnist_test2.csv");
+	//LoadData("C:\\Users\\hapes\\Downloads\\vektory.txt");
 
 	// normalizuju data
 	NormalizeDataset();
 
 	//vypocet
-	Run(5);
+	Run(20);
 
 	return 0;
 }
@@ -47,41 +49,85 @@ int main(int argc, char* argv[])
 void Run(double windowS) {
 	
 	windowSize = windowS;
+	int running = totalCount;
+	//omp_set_num_threads(8);
+#pragma omp parallel for
+	for (int i = 0; i < totalCount; i++) {
+		cout << "This is thread " << omp_get_thread_num() << " speaking" << endl;
+	}
+
+	while (running > 0)
+	{
 
 #pragma omp parallel for
-	for (int i = 0; i < totalCount; i++)
-	{
-		double* centroid = centroidsPoints[i];
-		double** okoli = (double**)malloc(totalCount * sizeof(double*));
-		for (int j = 0; j < totalCount; j++) okoli[j] = nullptr;
-
-		//najit okoli bodu
-		int countIndex = -1;
-		for (int j = 0; j < totalCount; j++)
+		for (int i = 0; i < totalCount; i++)
 		{
-			//if (j == i) continue;
-			double* vector = vectorsPoints[j];
-			double sum = 0;
+			if (settled[i]) continue;
+			double* centroid = centroidsPoints[i];
+			double** okoli = (double**)malloc(totalCount * sizeof(double*));
+			for (int j = 0; j < totalCount; j++) okoli[j] = nullptr;
 
-			for (int k = 0; k < dims; k++)
+			//najit okoli bodu
+			int countIndex = -1;
+			for (int j = 0; j < totalCount; j++)
 			{
-				sum += (vector[k] - centroid[k]) * (vector[k] - centroid[k]);
-			}
+				//if (j == i) continue;
+				double* vector = vectorsPoints[j];
+				double sum = 0;
+
+				for (int k = 0; k < dims; k++)
+				{
+					sum += (vector[k] - centroid[k]) * (vector[k] - centroid[k]);
+				}
 			
-			if (sum < (windowSize*windowSize) && sum != 0)
+				if (sum < (windowSize*windowSize) && sum != 0)
+				{
+					//pridat do okoli bodu
+					//#pragma omp critical
+					okoli[++countIndex] = vectorsPoints[j];
+				}
+			}
+		
+			//vypocitat posun a posunout
+			bool posunul = PosunHustotaTest(i, okoli, countIndex + 1, centroid);
+
+			free(okoli);
+	#pragma omp critical
+			if (!posunul)
 			{
-				//pridat do okoli bodu
-				okoli[++countIndex] = vectorsPoints[j];
+				settled[i] = true;
+				running--;
 			}
 		}
-		
-		//vypocitat posun a posunout
-		//double* posun = Hustota(i, okoli, countIndex + 1);
-
-		//Add(centroid, posun);
-
 	}
 	
+}
+bool PosunHustotaTest(int pos, double** okoliBodu, int pocet, double* centroid) {
+
+	//vypoctu normalniho centroidu
+	double* sum = (double*)malloc(dims * sizeof(double));
+#pragma omp parallel for
+	for (int i = 0; i < dims; i++) sum[i] = 0;
+#pragma omp parallel for
+	for (int i = 0; i < pocet; i++)
+	{
+		double* vektor = okoliBodu[i];
+		Add(sum, vektor);
+	}
+	bool posunulSe = false;
+	for (int i = 0; i < dims; i++)
+	{
+		sum[i] /= pocet;
+
+		if (sum[i] != centroid[i]) posunulSe = true;
+	}
+
+	//Add(centroid, sum);
+	memcpy(centroid, sum, dims * sizeof(double));
+
+	free(sum);
+
+	return posunulSe;
 }
 double* Hustota(int pos, double** okoliBodu, int pocet) {
 
@@ -188,12 +234,15 @@ void LoadData(string filepath) {
 		memcpy(centroids, &(vectors[0]), mem_size);
 		vectorsPoints = (double**)malloc(totalCount * sizeof(double*));
 		centroidsPoints = (double**)malloc(totalCount * sizeof(double*));
+		settled = (bool*)malloc(totalCount * sizeof(bool));
 
 		for (int i = 0; i < totalCount; i++)
 		{
 			vectorsPoints[i] = &vectors[i * dims];
 			centroidsPoints[i] = &centroids[i*dims];
+			settled[i] = false;
 		}
+
 	}
 }
 void NormalizeDataset() {
