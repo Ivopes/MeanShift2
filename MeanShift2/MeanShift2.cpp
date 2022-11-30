@@ -14,7 +14,7 @@
 using namespace std;
 
 
-const double MOVE_THRESHOLD = 0.0000001;
+const double MOVE_THRESHOLD = 0.00001;
 int dims;
 int totalCount;
 double* vectors;
@@ -35,18 +35,19 @@ bool Hustota(double** okoliBodu, int pocet, double* centroid);
 bool PosunHustotaTest(int pos, double** okoliBodu, int pocet, double* centroid);
 double* Add(double* one, double* two);
 double EuclidDistance(double* one, double* two);
+int ClusterCount();
 
 int main(int argc, char* argv[])
 {
-	//LoadData("C:\\Users\\hapes\\Downloads\\meanSoubory\\mnist_test2.csv");
+	LoadData("C:\\Users\\hapes\\Downloads\\meanSoubory\\mnist_test2.csv");
 	//LoadData("C:\\Users\\hapes\\Downloads\\vektory.txt");
-	LoadDataTest("C:\\Users\\hapes\\Downloads\\data_dim_txt\\dim2.txt");
+	//LoadDataTest("C:\\Users\\hapes\\Downloads\\data_dim_txt\\dim2.txt");
 
 	// normalizuju data
 	NormalizeDataset();
 
 	//vypocet
-	Run(.1);
+	Run(0.1);
 
 	return 0;
 }
@@ -57,6 +58,7 @@ void Run(double windowS) {
 	int running = totalCount;
 	//omp_set_num_threads(8);
 
+	bool start = true;
 
 	while (running > 0)
 	{
@@ -74,7 +76,7 @@ void Run(double windowS) {
 
 			for (int j = 0; j < totalCount; j++)
 			{
-				//if (j == i) continue;
+				if (start && j == i) continue;
 				double* vector = vectorsPoints[j];
 				double sum = 0;
 
@@ -87,7 +89,7 @@ void Run(double windowS) {
 				{
 					//pridat do okoli bodu
 
-						okoli[++countIndex] = vectorsPoints[j];
+					okoli[++countIndex] = vectorsPoints[j];
 					
 				}
 			}
@@ -97,14 +99,20 @@ void Run(double windowS) {
 			bool posunul = Hustota(okoli, countIndex + 1, centroid);
 
 			free(okoli);
-	#pragma omp critical
+			
+#pragma omp critical
 			if (!posunul)
 			{
 				settled[i] = true;
 				running--;
 			}
 		}
+		start = false;
 	}
+
+	//int pocet = ClusterCount();
+
+	cout << "Pocet clusteru: " << pocet << endl;
 	
 }
 bool PosunHustotaTest(int pos, double** okoliBodu, int pocet, double* centroid) {
@@ -135,6 +143,8 @@ bool PosunHustotaTest(int pos, double** okoliBodu, int pocet, double* centroid) 
 	return posunulSe;
 }
 bool Hustota(double** okoliBodu, int pocet, double* centroid) {
+
+	if (pocet == 0) return false;
 
 	double* horni = (double*)malloc(dims * sizeof(double));
 	double** tempVysledky = (double**)malloc(pocet * sizeof(double*));
@@ -185,7 +195,12 @@ bool Hustota(double** okoliBodu, int pocet, double* centroid) {
 	for (int i = 0; i < dims; i++)
 	{
 		double t = horni[i] / dolni;
-		if (t != centroid[i]) didMove = true;
+		//if (t != centroid[i]) didMove = true;
+		if (abs(centroid[i] - t) > MOVE_THRESHOLD) didMove = true;
+		if (isnan(t))
+		{
+			int aa = pocet;
+		}
 		centroid[i] = t;
 		//horni[i] = t;
 	}
@@ -378,4 +393,38 @@ double FindMax(int index)
 
 	return max_val;
 }
+int ClusterCount() {
+	int count = 0;
+	bool* mask = (bool*)malloc(totalCount * sizeof(bool));
 
+#pragma omp parallel for
+	for (int i = 0; i < totalCount; i++) mask[i] = false;
+
+	for (int i = 0; i < totalCount; i++)
+	{
+		if (!mask[i])
+		{
+			mask[i] = true;
+			count++;
+		}
+		else continue;
+
+		double* curr = centroidsPoints[i];
+		for (int j = i+1; j < totalCount; j++)
+		{
+			double* compare = centroidsPoints[j];
+			for (int k = 0; k < dims; k++)
+			{
+				if (!mask[j] && abs(curr[k] - compare[k]) <= MOVE_THRESHOLD)
+				{
+					mask[i] = true;
+					mask[j] = true;
+				}
+			}
+		}
+	}
+
+	free(mask);
+
+	return count;
+}
