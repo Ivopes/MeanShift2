@@ -15,6 +15,7 @@ using namespace std;
 
 
 const double MOVE_THRESHOLD = 0.00001;
+const double IDENTITY_THRESHOLD = 0.1;
 int dims;
 int totalCount;
 double* vectors;
@@ -110,7 +111,7 @@ void Run(double windowS) {
 		start = false;
 	}
 
-	//int pocet = ClusterCount();
+	int pocet = ClusterCount();
 
 	cout << "Pocet clusteru: " << pocet << endl;
 	
@@ -396,6 +397,7 @@ double FindMax(int index)
 int ClusterCount() {
 	int count = 0;
 	bool* mask = (bool*)malloc(totalCount * sizeof(bool));
+	int* maskk = (int*)malloc(totalCount * sizeof(int));
 
 #pragma omp parallel for
 	for (int i = 0; i < totalCount; i++) mask[i] = false;
@@ -404,8 +406,9 @@ int ClusterCount() {
 	{
 		if (!mask[i])
 		{
-			mask[i] = true;
 			count++;
+			mask[i] = true;
+			maskk[i] = count;
 		}
 		else continue;
 
@@ -413,18 +416,21 @@ int ClusterCount() {
 		for (int j = i+1; j < totalCount; j++)
 		{
 			double* compare = centroidsPoints[j];
-			for (int k = 0; k < dims; k++)
+
+			double distance = EuclidDistance(curr, compare);
+
+			if (distance < IDENTITY_THRESHOLD)
 			{
-				if (!mask[j] && abs(curr[k] - compare[k]) <= MOVE_THRESHOLD)
-				{
-					mask[i] = true;
-					mask[j] = true;
-				}
+				mask[i] = true;
+				mask[j] = true;
+				maskk[j] = count;
+
 			}
 		}
 	}
 
 	free(mask);
+	free(maskk);
 
 	return count;
 }
