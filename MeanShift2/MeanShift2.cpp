@@ -31,16 +31,20 @@ void NormalizeDataset();
 double FindMin(int index);
 double FindMax(int index);
 void Run(double windowS);
-double Kernel(double input);
+double Kernel(double* input);
+double KernelOld(double input);
+bool HustotaOld(double** okoliBodu, int pocet, double* centroid);
 bool Hustota(double** okoliBodu, int pocet, double* centroid);
 bool PosunHustotaTest(int pos, double** okoliBodu, int pocet, double* centroid);
 double* Add(double* one, double* two);
+double* Subs(double* one, double* two);
 double EuclidDistance(double* one, double* two);
 int ClusterCount();
+double VectorLengthSquared(double* v);
 
 int main(int argc, char* argv[])
 {
-	LoadData("C:\\Users\\hapes\\Downloads\\meanSoubory\\mnist_test2.csv");
+	LoadData("C:\\Users\\hapes\\Downloads\\meanSoubory\\mnist_test.csv");
 	//LoadData("C:\\Users\\hapes\\Downloads\\vektory.txt");
 	//LoadDataTest("C:\\Users\\hapes\\Downloads\\data_dim_txt\\dim2.txt");
 
@@ -149,6 +153,99 @@ bool Hustota(double** okoliBodu, int pocet, double* centroid) {
 
 	double* horni = (double*)malloc(dims * sizeof(double));
 	double** tempVysledky = (double**)malloc(pocet * sizeof(double*));
+
+	//vypoctu horni cast zlomku	
+#pragma omp parallel for
+	for (int i = 0; i < pocet; i++)
+	{
+		double* temp = (double*)malloc(dims * sizeof(double));
+		double* v = okoliBodu[i];
+		memcpy(temp, v, dims * (sizeof(double)));
+		//double distance = EuclidDistance(centroid, v);
+		double* kernelInput = Subs(v, centroid);
+		double k = Kernel(kernelInput);
+		for (int j = 0; j < dims; j++) temp[j] *= k;
+
+		tempVysledky[i] = temp;
+
+		free(kernelInput);
+	}
+
+	//Paralleni SUM horni casti
+#pragma omp parallel for
+	for (int i = 0; i < dims; i++)
+	{
+		horni[i] = 0;
+		for (int j = 0; j < pocet; j++)
+		{
+			double* v = tempVysledky[j];
+			horni[i] += v[i];
+		}
+	}
+
+	//vypoctu dolni cast funkce	
+	double dolni = 0;
+
+#pragma omp simd reduction(+:dolni)
+	for (int i = 0; i < pocet; i++)
+	{
+		double* v = okoliBodu[i];
+		double* kernelInput = Subs(v, centroid);
+		double k = Kernel(kernelInput);
+
+		dolni += k;
+
+		free(kernelInput);
+	}
+
+	bool didMove = false;
+
+
+	//double* novaPozice = (double*)malloc(dims * sizeof(double));
+	//podelit hodni/dolni
+#pragma omp parallel for
+	for (int i = 0; i < dims; i++)
+	{
+		double t = horni[i] / dolni;
+		//if (t != centroid[i]) didMove = true;
+		if (abs(centroid[i] - t) > MOVE_THRESHOLD) didMove = true;
+		if (isnan(t))
+		{
+			int aa = pocet;
+		}
+		centroid[i] = t;
+		//horni[i] = t;
+	}
+
+	//uvolnit pamet
+#pragma omp parallel for
+	for (int i = 0; i < pocet; i++)
+	{
+		free(tempVysledky[i]);
+	}
+	free(tempVysledky);
+	free(horni);
+
+	//vratit vektor posunu
+	return didMove;
+}
+double Kernel(double* input) {
+	double zlomek = 1.0 / (sqrt(2 * M_PI) * windowSize);
+
+	double wPwr = windowSize * windowSize;
+
+	double ePwr = exp(-(VectorLengthSquared(input)/(wPwr*2)));
+	
+	double res = zlomek * ePwr;
+
+	return res;
+}
+bool HustotaOld(double** okoliBodu, int pocet, double* centroid) {
+
+	if (pocet == 0) return false;
+
+	double* horni = (double*)malloc(dims * sizeof(double));
+	double** tempVysledky = (double**)malloc(pocet * sizeof(double*));
 	
 	//vypoctu horni cast zlomku	
 #pragma omp parallel for
@@ -158,7 +255,7 @@ bool Hustota(double** okoliBodu, int pocet, double* centroid) {
 		double* v = okoliBodu[i];
 		memcpy(temp, v, dims * (sizeof(double)));
 		double distance = EuclidDistance(centroid, v);
-		double k = Kernel(distance);
+		double k = KernelOld(distance);
 		for (int j = 0; j < dims; j++) temp[j] *= k;
 
 		tempVysledky[i] = temp;
@@ -184,7 +281,7 @@ bool Hustota(double** okoliBodu, int pocet, double* centroid) {
 	{
 		double* v = okoliBodu[i];
 		double distance = EuclidDistance(centroid, v);
-		double k = Kernel(distance);
+		double k = KernelOld(distance);
 
 		dolni += k;
 	}
@@ -218,18 +315,34 @@ bool Hustota(double** okoliBodu, int pocet, double* centroid) {
 	//vratit vektor posunu
 	return didMove;
 }
-double Kernel(double input) {
+double KernelOld(double input) {
+	double zlomek = 1.0 / (sqrt(2 * M_PI) * windowSize);
+
 	double wPwr = windowSize * windowSize;
 
-	double res = exp(-(input/(wPwr*2)));
-	
+	double ePwr = exp(-(input / (wPwr * 2)));
+
+	double res = zlomek * ePwr;
+
 	return res;
+}
+double VectorLengthSquared(double* v)
+{
+	double sum = 0;
+
+#pragma omp simd reduction (+:sum)
+	for (int i = 0; i < dims; i++)
+	{
+		sum = sum + v[i] * v[i];
+	}
+
+	return sum;
 }
 double EuclidDistance(double* one, double* two)
 {
 	double sum = 0;
 	
-#pragma omp parallel for
+#pragma omp simd reduction (+:sum)
 	for (int i = 0; i < dims; i++)
 	{
 		sum += (one[i] - two[i]) * (one[i] - two[i]);
@@ -244,6 +357,15 @@ double* Add(double* one, double* two) {
 		one[i] += two[i];
 	}
 	return one;
+}
+double* Subs(double* one, double* two) {
+	double* result = (double*)malloc(dims * sizeof(double));
+#pragma omp parallel for
+	for (int i = 0; i < dims; i++)
+	{
+		result[i] = one[i] - two[i];
+	}
+	return result;
 }
 void LoadDataTest(string filepath) {
 
@@ -289,7 +411,6 @@ void LoadDataTest(string filepath) {
 
 	}
 }
-
 void LoadData(string filepath) {
 	
 	std::ifstream file(filepath);
