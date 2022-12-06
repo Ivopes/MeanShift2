@@ -13,9 +13,10 @@
 
 using namespace std;
 
-
-const double MOVE_THRESHOLD = 0.00001;
-const double IDENTITY_THRESHOLD = 0.1;
+// did centroid move?
+const double MOVE_THRESHOLD = 50;
+// Are centorids the same in the end?
+const double IDENTITY_THRESHOLD = 1500;
 int dims;
 int totalCount;
 double* vectors;
@@ -44,21 +45,21 @@ double VectorLengthSquared(double* v);
 
 int main(int argc, char* argv[])
 {
-	LoadData("C:\\Users\\hapes\\Downloads\\meanSoubory\\mnist_test.csv");
+	LoadData("mnist_test.csv");
 	//LoadData("C:\\Users\\hapes\\Downloads\\vektory.txt");
 	//LoadDataTest("C:\\Users\\hapes\\Downloads\\data_dim_txt\\dim2.txt");
 
 	// normalizuju data
-	NormalizeDataset();
+	//NormalizeDataset();
 
 	//vypocet
-	Run(0.1);
+	Run(1000);
 
 	return 0;
 }
 
 void Run(double windowS) {
-	
+
 	windowSize = windowS;
 	int running = totalCount;
 	//omp_set_num_threads(8);
@@ -89,22 +90,20 @@ void Run(double windowS) {
 				{
 					sum += (vector[k] - centroid[k]) * (vector[k] - centroid[k]);
 				}
-			
-				if (sum < (windowSize*windowSize) && sum != 0)
+
+				if (sum < (windowSize * windowSize))
 				{
 					//pridat do okoli bodu
-
 					okoli[++countIndex] = vectorsPoints[j];
-					
+
 				}
 			}
-		
+
 			//vypocitat posun a posunout
 			//bool posunul = PosunHustotaTest(i, okoli, countIndex + 1, centroid);
 			bool posunul = Hustota(okoli, countIndex + 1, centroid);
-
 			free(okoli);
-			
+
 #pragma omp critical
 			if (!posunul)
 			{
@@ -118,7 +117,7 @@ void Run(double windowS) {
 	int pocet = ClusterCount();
 
 	cout << "Pocet clusteru: " << pocet << endl;
-	
+
 }
 bool PosunHustotaTest(int pos, double** okoliBodu, int pocet, double* centroid) {
 
@@ -201,20 +200,22 @@ bool Hustota(double** okoliBodu, int pocet, double* centroid) {
 	bool didMove = false;
 
 
-	//double* novaPozice = (double*)malloc(dims * sizeof(double));
+	double* novaPozice = (double*)malloc(dims * sizeof(double));
 	//podelit hodni/dolni
 #pragma omp parallel for
 	for (int i = 0; i < dims; i++)
 	{
-		double t = horni[i] / dolni;
-		//if (t != centroid[i]) didMove = true;
-		if (abs(centroid[i] - t) > MOVE_THRESHOLD) didMove = true;
-		if (isnan(t))
-		{
-			int aa = pocet;
-		}
-		centroid[i] = t;
-		//horni[i] = t;
+		novaPozice[i] = horni[i] / dolni;
+	}
+
+	double delkaPosunu = EuclidDistance(novaPozice, centroid);
+
+	if (delkaPosunu >= MOVE_THRESHOLD) didMove = true;
+
+#pragma omp parallel for
+	for (int i = 0; i < dims; i++)
+	{
+		centroid[i] = novaPozice[i];
 	}
 
 	//uvolnit pamet
@@ -234,8 +235,8 @@ double Kernel(double* input) {
 
 	double wPwr = windowSize * windowSize;
 
-	double ePwr = exp(-(VectorLengthSquared(input)/(wPwr*2)));
-	
+	double ePwr = exp(-(VectorLengthSquared(input) / (wPwr * 2)));
+
 	double res = zlomek * ePwr;
 
 	return res;
@@ -246,7 +247,7 @@ bool HustotaOld(double** okoliBodu, int pocet, double* centroid) {
 
 	double* horni = (double*)malloc(dims * sizeof(double));
 	double** tempVysledky = (double**)malloc(pocet * sizeof(double*));
-	
+
 	//vypoctu horni cast zlomku	
 #pragma omp parallel for
 	for (int i = 0; i < pocet; i++)
@@ -274,7 +275,7 @@ bool HustotaOld(double** okoliBodu, int pocet, double* centroid) {
 	}
 
 	//vypoctu dolni cast funkce	
-	double dolni = 0; 
+	double dolni = 0;
 
 #pragma omp simd reduction(+:dolni)
 	for (int i = 0; i < pocet; i++)
@@ -341,7 +342,7 @@ double VectorLengthSquared(double* v)
 double EuclidDistance(double* one, double* two)
 {
 	double sum = 0;
-	
+
 #pragma omp simd reduction (+:sum)
 	for (int i = 0; i < dims; i++)
 	{
@@ -412,7 +413,7 @@ void LoadDataTest(string filepath) {
 	}
 }
 void LoadData(string filepath) {
-	
+
 	std::ifstream file(filepath);
 
 	if (file.is_open())
@@ -462,7 +463,7 @@ void LoadData(string filepath) {
 		for (int i = 0; i < totalCount; i++)
 		{
 			vectorsPoints[i] = &vectors[i * dims];
-			centroidsPoints[i] = &centroids[i*dims];
+			centroidsPoints[i] = &centroids[i * dims];
 			settled[i] = false;
 		}
 
@@ -493,7 +494,7 @@ void NormalizeDataset() {
 		}
 	}
 }
-double FindMin(int index) 
+double FindMin(int index)
 {
 	double min_val = vectors[0];
 #pragma omp simd reduction(min:min_val)
@@ -534,7 +535,7 @@ int ClusterCount() {
 		else continue;
 
 		double* curr = centroidsPoints[i];
-		for (int j = i+1; j < totalCount; j++)
+		for (int j = i + 1; j < totalCount; j++)
 		{
 			double* compare = centroidsPoints[j];
 
