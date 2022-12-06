@@ -17,6 +17,7 @@ using namespace std;
 const double MOVE_THRESHOLD = 50;
 // Are centorids the same in the end?
 const double IDENTITY_THRESHOLD = 1500;
+const int CACHE_SIZE = 128;
 int dims;
 int totalCount;
 double* vectors;
@@ -69,7 +70,7 @@ void Run(double windowS) {
 	while (running > 0)
 	{
 
-#pragma omp parallel for
+#pragma omp parallel for collapse(3)
 		for (int i = 0; i < totalCount; i++)
 		{
 			if (settled[i]) continue;
@@ -95,7 +96,6 @@ void Run(double windowS) {
 				{
 					//pridat do okoli bodu
 					okoli[++countIndex] = vectorsPoints[j];
-
 				}
 			}
 
@@ -450,20 +450,26 @@ void LoadData(string filepath) {
 
 		file.close();
 
+		int vectorLwithPadding = (ceil(dims / CACHE_SIZE) + 1) * CACHE_SIZE;
+
 		totalCount = v.size() / dims;
-		size_t mem_size = totalCount * dims * sizeof(double);
+		size_t mem_size = totalCount * vectorLwithPadding * sizeof(double);
 		vectors = (double*)malloc(mem_size);
-		memcpy(vectors, &(v[0]), mem_size);
+		for (int i = 0; i < totalCount; i++)
+		{
+			memcpy(vectors + i * vectorLwithPadding, &(v[i * dims]), dims * sizeof(double));
+		}
 		centroids = (double*)malloc(mem_size);
 		memcpy(centroids, &(vectors[0]), mem_size);
 		vectorsPoints = (double**)malloc(totalCount * sizeof(double*));
 		centroidsPoints = (double**)malloc(totalCount * sizeof(double*));
 		settled = (bool*)malloc(totalCount * sizeof(bool));
 
+		//Pomocne pole pro lepsi manipulaci
 		for (int i = 0; i < totalCount; i++)
 		{
-			vectorsPoints[i] = &vectors[i * dims];
-			centroidsPoints[i] = &centroids[i * dims];
+			vectorsPoints[i] = &vectors[i * vectorLwithPadding];
+			centroidsPoints[i] = &centroids[i * vectorLwithPadding];
 			settled[i] = false;
 		}
 
